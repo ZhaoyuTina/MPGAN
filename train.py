@@ -126,6 +126,35 @@ def get_gen_noise(
 
     return noise, point_noise
 
+class BucketizeFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input):
+        # Three valid outputs for z are, 0.166666 or 1/6, 0.5, 0.833333 or 5/6
+        boundaries = torch.tensor([0.3333,0.6666]) 
+        input[:, :, 2] = torch.bucketize(input[:, :, 2], boundaries)
+        # them map 0 (values < 0.3333) to 1/6; 1 (0.3333 < values < 0.6666) to 0.5; 2 (values > 0.6666) to 5/6
+        for i in range(input.shape[0]):
+            for j in range(input.shape[1]):
+                if input[i,j,2] == 0:
+                    input[i,j,2] = 1/6
+                elif input[i,j,2] == 1:
+                    input[i,j,2] = 0.5
+                else:
+                    input[i,j,2] = 5/6
+
+        return input 
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return F.hardtanh(grad_output)
+
+class BucketizeSTE(torch.nn.Module):
+    def __init__(self):
+        super(BucketizeSTE, self).__init__()
+
+    def forward(self, x):
+        x = BucketizeFunction.apply(x)
+        return x
 
 def gen(
     model_args,
@@ -190,6 +219,11 @@ def gen(
         )
 
     gen_data = G(noise, labels)
+    
+    gen_data = G(noise, labels) 
+    ste = BucketizeSTE() # requires size here
+    gen_data = ste(gen_data)
+    print(gen_data)
 
     if "mask_manual" in extra_args and extra_args["mask_manual"]:
         # TODO: add pt_cutoff to extra_args
