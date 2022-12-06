@@ -27,6 +27,7 @@ import logging
 
 # h = hpy()
 
+# TODO switch eta phi
 LAYER_SPECS = [(3, 96), (12, 12), (12, 6)]
 num_layers = len(LAYER_SPECS)
 shift = -0.5  # from normalisation

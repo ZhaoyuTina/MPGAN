@@ -24,3 +24,4 @@ setup.py
 *test*
 
 *.ipynb
+*.yaml
