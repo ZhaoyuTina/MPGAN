@@ -164,7 +164,6 @@ class BucketizeFunction(torch.autograd.Function):
     def forward(ctx, input):
         # set values to bin centers, taking care of normalisation
         z_bins = torch.bucketize(input[:, :, z_idx], z_boundaries.to(input.device))
-        # TODO don't know why add 0.5, not - 0.5
         input[:, :, z_idx] = ((z_bins + 0.5) / num_layers) + shift
         # Tina's version
         # input[:, :, z_idx] = ((z_bins + shift) / num_layers) - shift

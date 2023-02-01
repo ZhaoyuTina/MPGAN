@@ -88,6 +88,7 @@ def plot_layerwise_hit_feats(
     real_hits = real_showers[real_mask]
     gen_hits = gen_showers[gen_mask]
 
+    # try to print out
     real_layer_etas = []
     real_layer_phis = []
     real_layer_Es = []
@@ -98,13 +99,14 @@ def plot_layerwise_hit_feats(
 
     for i in range(3):
         real_layer_hits = real_hits[
-            (real_hits[:, 2] > i * 0.33) * (real_hits[:, 2] < (i + 1) * 0.33)
-        ]
+            (real_hits[:, 2] >= i * 0.33) * (real_hits[:, 2] < (i + 1) * 0.33)
+        ] 
+        # >=
         real_layer_etas.append(((real_layer_hits[:, 0] * LAYER_SPECS[i][1]) - 0.5).astype(int))
         real_layer_phis.append(((real_layer_hits[:, 1] * LAYER_SPECS[i][0]) - 0.5).astype(int))
         real_layer_Es.append(real_layer_hits[:, 3])
 
-        gen_layer_hits = gen_hits[(gen_hits[:, 2] > i * 0.33) * (gen_hits[:, 2] < (i + 1) * 0.33)]
+        gen_layer_hits = gen_hits[(gen_hits[:, 2] >= i * 0.33) * (gen_hits[:, 2] < (i + 1) * 0.33)]
         gen_layer_etas.append(((gen_layer_hits[:, 0] * LAYER_SPECS[i][1]) - 0.5).astype(int))
         gen_layer_phis.append(((gen_layer_hits[:, 1] * LAYER_SPECS[i][0]) - 0.5).astype(int))
         gen_layer_Es.append(gen_layer_hits[:, 3])
