@@ -45,11 +45,21 @@ def plot_hit_feats(
     if real_mask is not None:
         parts_real = real_jets[real_mask]
         parts_gen = gen_jets[gen_mask]
+        
+        print("h gen data")
+        print(parts_gen.shape) #try print h
+
+        print(f"{parts_gen = }")
+
+        print("phi")
+        print(parts_gen[:,1])
+
     else:
         parts_real = real_jets.reshape(-1, real_jets.shape[2])
         parts_gen = gen_jets.reshape(-1, gen_jets.shape[2])
 
-    # plt.switch_backend("agg")
+
+    
 
     fig = plt.figure(figsize=(16, 16))
 
@@ -65,8 +75,13 @@ def plot_hit_feats(
         plt.legend(loc=1, prop={"size": 18})
 
     plt.tight_layout(pad=2.0)
-    if figs_path is not None and name is not None:
-        plt.savefig(figs_path + name + ".pdf", bbox_inches="tight")
+
+    # TODO pull from new updates
+    # test temporarily forbid saving plots
+    # if figs_path is not None and name is not None:
+    #     plt.savefig(figs_path + name + ".pdf", bbox_inches="tight")
+
+    plt.show()
 
     if show:
         plt.show()
@@ -87,6 +102,12 @@ def plot_layerwise_hit_feats(
 ):
     real_hits = real_showers[real_mask]
     gen_hits = gen_showers[gen_mask]
+    print("lh gen data")
+    print(gen_hits.shape)  #Try print gen data for lh
+    print(f"{gen_hits = }")
+
+    print("phi")
+    print(gen_hits[:,1])
 
     # try to print out
     real_layer_etas = []
@@ -102,6 +123,7 @@ def plot_layerwise_hit_feats(
             (real_hits[:, 2] >= i * 0.33) * (real_hits[:, 2] < (i + 1) * 0.33)
         ] 
         # >=
+        # TODO delete as type (int)
         real_layer_etas.append(((real_layer_hits[:, 0] * LAYER_SPECS[i][1]) - 0.5).astype(int))
         real_layer_phis.append(((real_layer_hits[:, 1] * LAYER_SPECS[i][0]) - 0.5).astype(int))
         real_layer_Es.append(real_layer_hits[:, 3])
@@ -157,10 +179,13 @@ def plot_layerwise_hit_feats(
         axs[2].set_yscale("log")
         axs[2].legend()
 
-    # plt.tight_layout(2.0)
-    if figs_path is not None and name is not None:
-        print(f"saving fig at {figs_path} {name}")
-        plt.savefig(figs_path + name + ".pdf", bbox_inches="tight")
+     # test temporarily forbid saving plots
+    # # plt.tight_layout(2.0)
+    # if figs_path is not None and name is not None:
+    #     print(f"saving fig at {figs_path} {name}")
+    #     plt.savefig(figs_path + name + ".pdf", bbox_inches="tight")
+
+    plt.show()
 
     if show:
         plt.show()

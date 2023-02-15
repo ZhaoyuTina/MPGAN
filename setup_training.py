@@ -949,6 +949,7 @@ def init_model_dirs(args):
 
     dirs = ["models", "losses", "figs"]
 
+    # TODO check why these folder are not been made
     for dir in dirs:
         args_dict[dir + "_path"] = f"{args.dir_path}/{args.name}/{dir}/"
         os.system(f'mkdir -p {args_dict[dir + "_path"]}')

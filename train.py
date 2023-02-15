@@ -168,7 +168,7 @@ class BucketizeFunction(torch.autograd.Function):
         # Tina's version
         # input[:, :, z_idx] = ((z_bins + shift) / num_layers) - shift
 
-        print(f"{z_bins = }")
+        # print(f"{z_bins = }")
 
         # lambda function to map eta and phi to different z
         for i in range(num_layers):
@@ -927,7 +927,7 @@ def train_loop(
         if args.break_zero:
             if batch_ndx == 0:
                 break
-
+        
 
 def train(
     args,
@@ -1007,6 +1007,70 @@ def train(
         for key in epoch_loss:
             logging.info("{} loss: {:.3f}".format(key, losses[key][-1]))
 
+        # test for gen data for 2 different hist
+        G.eval()
+        D.eval()
+        
+        real_jets, real_mask = X_test.unnormalize_features(
+            X_test.data[: args.eval_tot_samples].clone(),
+            ret_mask_separate=True,
+            is_real_data=True,
+            zero_mask_particles=True,
+            zero_neg_pt=True,
+        )
+
+        gen_output = gen_multi_batch(
+            model_eval_args,
+            G,
+            args.batch_size,
+            args.eval_tot_samples,
+            args.num_hits,
+            out_device="cpu",
+            model=args.model,
+            detach=True,
+            labels=X_test.jet_features[: args.eval_tot_samples]
+            if (args.mask_c or args.clabels)
+            else None,
+            **extra_args,
+        )
+        gen_jets, gen_mask = X_test.unnormalize_features(
+            gen_output,
+            ret_mask_separate=True,
+            is_real_data=False,
+            zero_mask_particles=True,
+            zero_neg_pt=True,
+        )
+
+        real_jets = real_jets.detach().cpu().numpy()
+        if real_mask is not None:
+            real_mask = real_mask.detach().cpu().numpy()
+
+        gen_jets = gen_jets.numpy()
+        if gen_mask is not None:
+            gen_mask = gen_mask.numpy()
+
+        make_plots(
+            losses,
+            epoch,
+            real_jets,
+            gen_jets,
+            real_mask,
+            gen_mask,
+            args.jets,
+            args.num_hits,
+            str(epoch),
+            args.figs_path,
+            args.losses_path,
+            save_epochs=args.save_epochs,
+            const_ylim=args.const_ylim,
+            coords=args.coords,
+            loss=args.loss,
+            shower_ims=args.shower_ims,
+        )
+
+        break
+
+        print(epoch, "save", args.save_epochs)
         if (epoch) % args.save_epochs == 0:
             eval_save_plot(
                 args,
