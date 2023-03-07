@@ -807,17 +807,17 @@ def eval_save_plot(
     if gen_mask is not None:
         gen_mask = gen_mask.numpy()
 
-    evaluate(
-        losses,
-        real_jets,
-        gen_jets,
-        args.jets,
-        num_particles=args.num_hits - args.pad_hits,
-        num_w1_eval_samples=args.w1_num_samples[0],
-        num_cov_mmd_eval_samples=args.cov_mmd_num_samples,
-        fpnd_batch_size=args.fpnd_batch_size,
-        efp_jobs=args.efp_jobs if hasattr(args, "efp_jobs") else None,
-    )
+    # evaluate(
+    #     losses,
+    #     real_jets,
+    #     gen_jets,
+    #     args.jets,
+    #     num_particles=args.num_hits - args.pad_hits,
+    #     num_w1_eval_samples=args.w1_num_samples[0],
+    #     num_cov_mmd_eval_samples=args.cov_mmd_num_samples,
+    #     fpnd_batch_size=args.fpnd_batch_size,
+    #     efp_jobs=args.efp_jobs if hasattr(args, "efp_jobs") else None,
+    # )
     save_losses(losses, args.losses_path)
 
     if args.make_plots:
@@ -841,20 +841,20 @@ def eval_save_plot(
         )
 
     # save model state and sample generated jets if this is the lowest w1m score yet
-    if epoch > 0 and losses["w1m"][-1][0] < best_epoch[-1][1]:
-        best_epoch.append([epoch, losses["w1m"][-1][0]])
-        np.savetxt(f"{args.outs_path}/best_epoch.txt", np.array(best_epoch))
+    # if epoch > 0 and losses["w1m"][-1][0] < best_epoch[-1][1]:
+    #     best_epoch.append([epoch, losses["w1m"][-1][0]])
+    #     np.savetxt(f"{args.outs_path}/best_epoch.txt", np.array(best_epoch))
     
-        np.save(f"{args.outs_path}/best_epoch_gen_jets", gen_jets)
-        np.save(f"{args.outs_path}/best_epoch_gen_mask", gen_mask)
+    #     np.save(f"{args.outs_path}/best_epoch_gen_jets", gen_jets)
+    #     np.save(f"{args.outs_path}/best_epoch_gen_mask", gen_mask)
     
-        with open(f"{args.outs_path}/best_epoch_losses.txt", "w") as f:
-            f.write(str({key: losses[key][-1] for key in losses}))
+    #     with open(f"{args.outs_path}/best_epoch_losses.txt", "w") as f:
+    #         f.write(str({key: losses[key][-1] for key in losses}))
     
-        if args.multi_gpu:
-            torch.save(G.module.state_dict(), f"{args.outs_path}/G_best_epoch.pt")
-        else:
-            torch.save(G.state_dict(), f"{args.outs_path}/G_best_epoch.pt")
+    #     if args.multi_gpu:
+    #         torch.save(G.module.state_dict(), f"{args.outs_path}/G_best_epoch.pt")
+    #     else:
+    #         torch.save(G.state_dict(), f"{args.outs_path}/G_best_epoch.pt")
 
 
 def train_loop(
