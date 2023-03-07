@@ -13,6 +13,7 @@ from torch.autograd import Variable
 from torch.autograd import grad as torch_grad
 from torch.distributions.normal import Normal
 
+from collections import Counter
 
 import numpy as np
 
@@ -162,34 +163,34 @@ def get_gen_noise(
 class BucketizeFunction(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input):
-        # set values to bin centers, taking care of normalisation
+        # set values to bin centers, taking care of normalisatio
+
+      
         z_bins = torch.bucketize(input[:, :, z_idx], z_boundaries.to(input.device))
         input[:, :, z_idx] = ((z_bins + 0.5) / num_layers) + shift
-        # Tina's version
-        # input[:, :, z_idx] = ((z_bins + shift) / num_layers) - shift
-
-        # print(f"{z_bins = }")
-
+        
         # lambda function to map eta and phi to different z
         for i in range(num_layers):
             # need to check whether z_b corresponds to current z values
             filter = z_bins == i
+           
 
+            filter_layer = input[filter]
+           
             phi_bins = torch.bucketize(
-                input[filter][:, phi_idx], phi_boundaries[i].to(input.device)
+                filter_layer[:, phi_idx], phi_boundaries[i].to(input.device)
             )
-            input[filter][:, phi_idx] = ((phi_bins + 0.5) / LAYER_SPECS[i][0]) + shift
+            filter_layer[:, phi_idx] = ((phi_bins + 0.5) / LAYER_SPECS[i][0]) + shift
+          
 
-            # TODO normalize phi_idx then deduce 0.5
-            # moves bins to the center, then divide by corresponding number of values from LAYERSPEC
-            # look at histograms
-
-            # eta_boundaries = torch.Tensor(eta_ranges[i])
+          
             eta_bins = torch.bucketize(
-                input[filter][:, eta_idx], eta_boundaries[i].to(input.device)
+                filter_layer[:, eta_idx], eta_boundaries[i].to(input.device)
             )
-            input[filter][:, eta_idx] = ((eta_bins + 0.5) / LAYER_SPECS[i][1]) + shift
-
+            
+            filter_layer[:, eta_idx] = ((eta_bins + 0.5) / LAYER_SPECS[i][1]) + shift
+            input[filter] = filter_layer
+          
         return input
 
     @staticmethod
@@ -269,11 +270,14 @@ def gen(
             model_args, num_samples, num_particles, model, device, noise_std
         )
 
-    gen_data = G(noise, labels)
+   
+
+    semi_gen_data = G(noise, labels)
 
     ste = BucketizeSTE(device)
-    gen_data = ste(gen_data)
-
+    gen_data = ste(semi_gen_data)
+    
+   
     if "mask_manual" in extra_args and extra_args["mask_manual"]:
         # TODO: add pt_cutoff to extra_args
         gen_data = mask_manual(model_args, gen_data, extra_args["pt_cutoff"])
@@ -803,17 +807,17 @@ def eval_save_plot(
     if gen_mask is not None:
         gen_mask = gen_mask.numpy()
 
-    # evaluate(
-    #     losses,
-    #     real_jets,
-    #     gen_jets,
-    #     args.jets,
-    #     num_particles=args.num_hits - args.pad_hits,
-    #     num_w1_eval_samples=args.w1_num_samples[0],
-    #     num_cov_mmd_eval_samples=args.cov_mmd_num_samples,
-    #     fpnd_batch_size=args.fpnd_batch_size,
-    #     efp_jobs=args.efp_jobs if hasattr(args, "efp_jobs") else None,
-    # )
+    evaluate(
+        losses,
+        real_jets,
+        gen_jets,
+        args.jets,
+        num_particles=args.num_hits - args.pad_hits,
+        num_w1_eval_samples=args.w1_num_samples[0],
+        num_cov_mmd_eval_samples=args.cov_mmd_num_samples,
+        fpnd_batch_size=args.fpnd_batch_size,
+        efp_jobs=args.efp_jobs if hasattr(args, "efp_jobs") else None,
+    )
     save_losses(losses, args.losses_path)
 
     if args.make_plots:
@@ -837,20 +841,20 @@ def eval_save_plot(
         )
 
     # save model state and sample generated jets if this is the lowest w1m score yet
-    # if epoch > 0 and losses["w1m"][-1][0] < best_epoch[-1][1]:
-    #     best_epoch.append([epoch, losses["w1m"][-1][0]])
-    #     np.savetxt(f"{args.outs_path}/best_epoch.txt", np.array(best_epoch))
-    #
-    #     np.save(f"{args.outs_path}/best_epoch_gen_jets", gen_jets)
-    #     np.save(f"{args.outs_path}/best_epoch_gen_mask", gen_mask)
-    #
-    #     with open(f"{args.outs_path}/best_epoch_losses.txt", "w") as f:
-    #         f.write(str({key: losses[key][-1] for key in losses}))
-    #
-    #     if args.multi_gpu:
-    #         torch.save(G.module.state_dict(), f"{args.outs_path}/G_best_epoch.pt")
-    #     else:
-    #         torch.save(G.state_dict(), f"{args.outs_path}/G_best_epoch.pt")
+    if epoch > 0 and losses["w1m"][-1][0] < best_epoch[-1][1]:
+        best_epoch.append([epoch, losses["w1m"][-1][0]])
+        np.savetxt(f"{args.outs_path}/best_epoch.txt", np.array(best_epoch))
+    
+        np.save(f"{args.outs_path}/best_epoch_gen_jets", gen_jets)
+        np.save(f"{args.outs_path}/best_epoch_gen_mask", gen_mask)
+    
+        with open(f"{args.outs_path}/best_epoch_losses.txt", "w") as f:
+            f.write(str({key: losses[key][-1] for key in losses}))
+    
+        if args.multi_gpu:
+            torch.save(G.module.state_dict(), f"{args.outs_path}/G_best_epoch.pt")
+        else:
+            torch.save(G.state_dict(), f"{args.outs_path}/G_best_epoch.pt")
 
 
 def train_loop(
@@ -869,7 +873,7 @@ def train_loop(
     extra_args,
 ):
     lenX = len(X_train_loaded)
-
+    
     for batch_ndx, data in tqdm(
         enumerate(X_train_loaded), total=lenX, mininterval=0.1, desc=f"Epoch {epoch}"
     ):
@@ -879,7 +883,9 @@ def train_loop(
         if args.model == "pcgan":
             # run through pre-trained inference network first i.e. find latent representation
             data = model_train_args["pcgan_G_inv"](data.clone())
-
+        
+        
+        
         if args.num_critic > 1 or (batch_ndx == 0 or (batch_ndx - 1) % args.num_gen == 0):
             D_loss_items = train_D(
                 model_train_args,
@@ -1007,70 +1013,6 @@ def train(
         for key in epoch_loss:
             logging.info("{} loss: {:.3f}".format(key, losses[key][-1]))
 
-        # test for gen data for 2 different hist
-        G.eval()
-        D.eval()
-        
-        real_jets, real_mask = X_test.unnormalize_features(
-            X_test.data[: args.eval_tot_samples].clone(),
-            ret_mask_separate=True,
-            is_real_data=True,
-            zero_mask_particles=True,
-            zero_neg_pt=True,
-        )
-
-        gen_output = gen_multi_batch(
-            model_eval_args,
-            G,
-            args.batch_size,
-            args.eval_tot_samples,
-            args.num_hits,
-            out_device="cpu",
-            model=args.model,
-            detach=True,
-            labels=X_test.jet_features[: args.eval_tot_samples]
-            if (args.mask_c or args.clabels)
-            else None,
-            **extra_args,
-        )
-        gen_jets, gen_mask = X_test.unnormalize_features(
-            gen_output,
-            ret_mask_separate=True,
-            is_real_data=False,
-            zero_mask_particles=True,
-            zero_neg_pt=True,
-        )
-
-        real_jets = real_jets.detach().cpu().numpy()
-        if real_mask is not None:
-            real_mask = real_mask.detach().cpu().numpy()
-
-        gen_jets = gen_jets.numpy()
-        if gen_mask is not None:
-            gen_mask = gen_mask.numpy()
-
-        make_plots(
-            losses,
-            epoch,
-            real_jets,
-            gen_jets,
-            real_mask,
-            gen_mask,
-            args.jets,
-            args.num_hits,
-            str(epoch),
-            args.figs_path,
-            args.losses_path,
-            save_epochs=args.save_epochs,
-            const_ylim=args.const_ylim,
-            coords=args.coords,
-            loss=args.loss,
-            shower_ims=args.shower_ims,
-        )
-
-        break
-
-        print(epoch, "save", args.save_epochs)
         if (epoch) % args.save_epochs == 0:
             eval_save_plot(
                 args,

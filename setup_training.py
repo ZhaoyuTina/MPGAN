@@ -1140,6 +1140,7 @@ def setup_mpgan(args, gen):
 
 def models(args, gen_only=False):
     """Set up generator and discriminator models, either new or loaded from a state dict"""
+    # TODO try to check the model here
     if args.model == "mpgan":
         G = setup_mpgan(args, gen=True)
         logging.info(G)
