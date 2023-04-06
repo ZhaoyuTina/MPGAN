@@ -67,6 +67,7 @@ def main():
     args.device = device
     logging.info("Args initalized")
 
+    print("logE, ", args.logE)
     X_train = CaloGANDataset(
         train=True,
         data_dir=args.datasets_path,
