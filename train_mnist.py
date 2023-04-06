@@ -1,13 +1,8 @@
-import jetnet
-from jetnet.datasets import JetNet
-from calogan_dataset import CaloGANDataset
-from jetnet.datasets.normalisations import FeaturewiseLinearBounded, FeaturewiseLinear
-
-
-from jetnet import evaluation
 import setup_training
 from mpgan import augment, mask_manual
 import plotting
+
+from mnist import evaluation, MNISTGraphDataset
 
 import torch
 from torch import Tensor
@@ -16,50 +11,60 @@ from torch.autograd import Variable
 from torch.autograd import grad as torch_grad
 from torch.distributions.normal import Normal
 
-from collections import Counter
-
 import numpy as np
 
 from os import remove
-from os.path import exists
 
 from tqdm import tqdm
 
 import logging
 
 
-# from guppy import hpy
+def setup_losses(args):
+    """Set up ``losses`` dict which stores model losses per epoch as well as evaluation metrics"""
+    losses = {}
 
-# h = hpy()
+    keys = ["D", "Dr", "Df", "G"]
+    if args.gp:
+        keys.append("gp")
 
-# TODO switch eta phi
-LAYER_SPECS = [(3, 96), (12, 12), (12, 6)]
-num_layers = len(LAYER_SPECS)
-shift = -0.5  # from normalisation
-eta_idx = 0
-phi_idx = 1
-z_idx = 2
+    eval_keys = ["fid"]
 
-# edges for binning z values
-# eta and phi are also mapped from layer_specs with pattern, can be represented by range
-# eta and phi boundaries should be 2 dimentional, depends on z value
+    if not args.fpnd:
+        eval_keys.remove("fid")
 
+    keys = keys + eval_keys
 
-eta_boundaries = [
-    (torch.range(1, LAYER_SPECS[i][1] - 1) / LAYER_SPECS[i][1]) + shift for i in range(3)
-]
+    for key in keys:
+        if args.load_model:
+            try:
+                losses[key] = np.loadtxt(f"{args.losses_path}/{key}.txt")
+                if losses[key].ndim == 0:
+                    losses[key] = np.expand_dims(losses[key], 0)
+                losses[key] = losses[key].tolist()
+                if key in eval_keys:
+                    losses[key] = losses[key][: int(args.start_epoch / args.save_epochs) + 1]
+                else:
+                    losses[key] = losses[key][: args.start_epoch + 1]
+            except OSError:
+                logging.info(f"{key} loss file not found")
+                losses[key] = []
+        else:
+            losses[key] = []
 
-phi_boundaries = [
-    (torch.range(1, LAYER_SPECS[i][0] - 1) / LAYER_SPECS[i][0]) + shift for i in range(3)
-]
+    if args.load_model:
+        try:
+            best_epoch = np.loadtxt(f"{args.outs_path}/best_epoch.txt")
+            if best_epoch.ndim == 1:
+                np.expand_dims(best_epoch, 0)
+            best_epoch = best_epoch.tolist()
+        except OSError:
+            logging.info("best epoch file not found")
+            best_epoch = [[0, 10000.0]]
+    else:
+        best_epoch = [[0, 10000.0]]  # saves the best model [epoch, fid score]
 
-# TODO don't know why should be num_layers - 1, this will have only 1 and 2, is it because mix of range and arange?
-# and why shift is -0.5
-# Raghav version
-z_boundaries = (torch.range(1, num_layers - 1) / num_layers) + shift
-
-# Tina version
-# z_boundaries = (torch.range(-1, num_layers -1) / num_layers) - shift
+    return losses, best_epoch
 
 
 def main():
@@ -67,52 +72,24 @@ def main():
     torch.autograd.set_detect_anomaly(False)
 
     args = setup_training.init()
+    args.mask_c = False
+    args.gapt_mask = False
+    args.fpnd_batch_size = 64
+    args.save_epochs = 5
     torch.manual_seed(args.seed)
     args.device = device
     logging.info("Args initalized")
 
-    print("logE, ", args.logE)
-    X_train = CaloGANDataset(
-        train=True,
-        data_dir=args.datasets_path,
-        num_particles=args.num_hits,
-        logE=args.logE,
-        use_mask=args.mask,
-        train_fraction=args.ttsplit,
+    X_train = MNISTGraphDataset(
+        data_dir=args.datasets_path, num_thresholded=args.num_hits, train=True, num=args.mnist_num
     )
-    jet_norm = FeaturewiseLinear(feature_scales=1.0 / args.num_hits)
-
-    data_args = {
-        "jet_type": args.jets,
-        "data_dir": args.datasets_path,
-        "num_particles": args.num_hits,
-        "particle_features": JetNet.all_particle_features
-        if args.mask
-        else JetNet.all_particle_features[:-1],
-        "jet_features": "num_particles"
-        if (args.clabels or args.mask_c or args.gapt_mask)
-        else None,
-        "particle_normalisation": particle_norm,
-        "jet_normalisation": jet_norm,
-        "split_fraction": [args.ttsplit, 1 - args.ttsplit, 0],
-    }
-
-    X_train = JetNet(**data_args, split="train")
     X_train_loaded = DataLoader(X_train, shuffle=True, batch_size=args.batch_size, pin_memory=True)
 
-    X_test = CaloGANDataset(
-        train=False,
-        data_dir=args.datasets_path,
-        num_particles=args.num_hits,
-        logE=args.logE,
-        use_mask=args.mask,
-        train_fraction=args.ttsplit,
+    X_test = MNISTGraphDataset(
+        data_dir=args.datasets_path, num_thresholded=args.num_hits, train=False, num=args.mnist_num
     )
     X_test_loaded = DataLoader(X_test, batch_size=args.batch_size, pin_memory=True)
-    logging.info(f"Data loaded \n X_train \n {X_train} \n X_test \n {X_test}")
-
-    # print(torch.max(X_train.view(-1, 30 * 4), axis=0))
-    # print(torch.max(X_test.view(-1, 30 * 4), axis=0))
+    logging.info("Data loaded")
 
     G, D = setup_training.models(args)
     model_train_args, model_eval_args, extra_args = setup_training.get_model_args(args)
@@ -121,7 +98,7 @@ def main():
     G_optimizer, D_optimizer = setup_training.optimizers(args, G, D)
     logging.info("Optimizers loaded")
 
-    losses, best_epoch = setup_training.losses(args)
+    losses, best_epoch = setup_losses(args)
 
     train(
         args,
@@ -185,57 +162,8 @@ def get_gen_noise(
     return noise, point_noise
 
 
-# Maybe not necessary? Can use the forward directly in Bucketize?
-class BucketizeFunction(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, input):
-        # set values to bin centers, taking care of normalisatio
-
-      
-        z_bins = torch.bucketize(input[:, :, z_idx], z_boundaries.to(input.device))
-        input[:, :, z_idx] = ((z_bins + 0.5) / num_layers) + shift
-        
-        # lambda function to map eta and phi to different z
-        for i in range(num_layers):
-            # need to check whether z_b corresponds to current z values
-            filter = z_bins == i
-           
-
-            filter_layer = input[filter]
-           
-            phi_bins = torch.bucketize(
-                filter_layer[:, phi_idx], phi_boundaries[i].to(input.device)
-            )
-            filter_layer[:, phi_idx] = ((phi_bins + 0.5) / LAYER_SPECS[i][0]) + shift
-          
-
-          
-            eta_bins = torch.bucketize(
-                filter_layer[:, eta_idx], eta_boundaries[i].to(input.device)
-            )
-            
-            filter_layer[:, eta_idx] = ((eta_bins + 0.5) / LAYER_SPECS[i][1]) + shift
-            input[filter] = filter_layer
-          
-        return input
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        return torch.nn.functional.hardtanh(grad_output)
-
-
-class BucketizeSTE(torch.nn.Module):
-    def __init__(self, device):
-        self.device = device
-        super(BucketizeSTE, self).__init__()
-
-    def forward(self, x):
-        x = BucketizeFunction.apply(x)
-        return x
-
-
 def gen(
-    model_args: dict,
+    model_args,
     G: torch.nn.Module,
     num_samples: int,
     num_particles: int,
@@ -256,6 +184,9 @@ def gen(
     ``lfc_latent_size`` (int) size of latent layer if ``lfc``,
     ``mask_learn_sep`` (bool) separate layer to learn masks,
     ``latent_node_size`` (int) size of each node's latent space, if not using lfc.
+
+    gapt:
+    ``embed_dim`` (int): size of node embeddings
 
     rgan, graphcnngan:
     ``latent_dim`` (int)
@@ -296,14 +227,8 @@ def gen(
             model_args, num_samples, num_particles, model, device, noise_std
         )
 
-   
+    gen_data = G(noise, labels)
 
-    semi_gen_data = G(noise, labels)
-
-    ste = BucketizeSTE(device)
-    gen_data = ste(semi_gen_data)
-    
-   
     if "mask_manual" in extra_args and extra_args["mask_manual"]:
         # TODO: add pt_cutoff to extra_args
         gen_data = mask_manual(model_args, gen_data, extra_args["pt_cutoff"])
@@ -345,7 +270,6 @@ def gen_multi_batch(
 
     if labels is not None:
         assert labels.shape[0] == num_samples, "number of labels doesn't match num_samples"
-        labels = Tensor(labels)
 
     gen_data = None
 
@@ -538,10 +462,10 @@ def train_D(
         data = augment.augment(augment_args, data, p)
         gen_data = augment.augment(augment_args, gen_data, p)
 
-    # log(f"G output: \n {gen_data[:2, :10]}")
+    log(f"G output: \n {gen_data[:2, :10]}")
 
     D_fake_output = D(gen_data, labels)
-    # log(f"D fake output: \n {D_fake_output[:10]}")
+    log(f"D fake output: \n {D_fake_output[:10]}")
 
     D_loss, D_loss_items = calc_D_loss(
         loss,
@@ -637,146 +561,50 @@ def save_losses(losses, losses_path):
         np.savetxt(f"{losses_path}/{key}.txt", losses[key])
 
 
-def evaluate(
-    losses,
-    real_jets,
-    gen_jets,
-    jet_type,
-    num_particles=30,
-    num_w1_eval_samples=10000,
-    num_cov_mmd_eval_samples=100,
-    num_fpnd_eval_samples=50000,
-    fpnd_batch_size=16,
-    efp_jobs=None,
-    real_efps=None,
-    gen_efps=None,
-):
-    """Calculate evaluation metrics using the JetNet library and add them to the losses dict"""
+from skimage.draw import draw
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 
-    print(real_jets.shape)
-    if "w1p" in losses:
-        w1pm, w1pstd = evaluation.w1p(
-            real_jets,
-            gen_jets,
-            exclude_zeros=True,
-            num_eval_samples=num_w1_eval_samples,
-            num_batches=real_jets.shape[0] // num_w1_eval_samples,
-            average_over_features=False,
-            return_std=True,
-        )
-        losses["w1p"].append(np.concatenate((w1pm, w1pstd)))
 
-    if "w1m" in losses:
-        w1mm, w1mstd = evaluation.w1m(
-            real_jets,
-            gen_jets,
-            num_eval_samples=num_w1_eval_samples,
-            num_batches=real_jets.shape[0] // num_w1_eval_samples,
-            return_std=True,
-        )
-        losses["w1m"].append(np.array([w1mm, w1mstd]))
+def draw_graph(graph, node_r, im_px):
+    imd = im_px + node_r
+    img = np.zeros((imd, imd), dtype=float)
 
-    if "w1efp" in losses:
-        w1efpm, w1efpstd = evaluation.w1efp(
-            real_jets,
-            gen_jets,
-            use_particle_masses=False,
-            num_eval_samples=num_w1_eval_samples,
-            num_batches=real_jets.shape[0] // num_w1_eval_samples,
-            average_over_efps=False,
-            return_std=True,
-            efp_jobs=efp_jobs,
-        )
-        losses["w1efp"].append(np.concatenate((w1efpm, w1efpstd)))
-
-    if "fpnd" in losses:
-        losses["fpnd"].append(
-            evaluation.fpnd(
-                gen_jets[:num_fpnd_eval_samples, :num_particles],
-                jet_type,
-                batch_size=fpnd_batch_size,
+    circles = []
+    for node in graph:
+        circles.append(
+            (
+                draw.circle_perimeter(int(node[1]), int(node[0]), node_r),
+                draw.disk((int(node[1]), int(node[0])), node_r),
+                node[2],
             )
         )
 
-    # coming soon
-    # if "fpd" in losses:
-    #     losses["fpd"].append(evaluation.fpd(real_efps, gen_efps, n_jobs=efp_jobs))
+    for circle in circles:
+        img[circle[1]] = circle[2]
+
+    return img
 
 
-def make_plots(
-    losses,
-    epoch,
-    real_jets,
-    gen_jets,
-    real_mask,
-    gen_mask,
-    jet_type,
-    num_particles,
-    name,
-    figs_path,
-    losses_path,
-    save_epochs=5,
-    const_ylim=False,
-    coords="polarrel",
-    dataset="jetnet",
-    loss="ls",
-    shower_ims=True,
-):
-    """Plot histograms, jet images, loss curves, and evaluation curves"""
+def make_images(gen_out, save_path, num_ims=100):
+    fig = plt.figure(figsize=(10, 10))
 
-    plotting.plot_hit_feats(
-        real_jets,
-        gen_jets,
-        real_mask,
-        gen_mask,
-        name=name + "h",
-        figs_path=figs_path,
-        num_particles=num_particles,
-        show=False,
-    )
+    node_r = 30
+    im_px = 1000
 
-    plotting.plot_layerwise_hit_feats(
-        real_jets,
-        gen_jets,
-        real_mask,
-        gen_mask,
-        name=name + "lh",
-        figs_path=figs_path,
-        num_particles=num_particles,
-        show=False,
-    )
+    gen_out[gen_out > 0.47] = 0.47
+    gen_out[gen_out < -0.5] = -0.5
 
-    if shower_ims:
-        plotting.plot_shower_ims(
-            gen_jets,
-            name=name + "_ims",
-            figs_path=figs_path,
-            show=False,
-        )
+    gen_out = gen_out * [im_px, im_px, 1] + [(im_px + node_r) / 2, (im_px + node_r) / 2, 0.55]
 
-    if len(losses["G"]) > 1:
-        plotting.plot_losses(losses, loss=loss, name=name, losses_path=losses_path, show=False)
+    for i in range(1, num_ims + 1):
+        fig.add_subplot(10, 10, i)
+        im_disp = draw_graph(gen_out[i - 1], node_r, im_px)
+        plt.imshow(im_disp, cmap=cm.gray_r, interpolation="nearest")
+        plt.axis("off")
 
-        try:
-            remove(losses_path + "/" + str(epoch - save_epochs) + ".pdf")
-        except:
-            logging.info("Couldn't remove previous loss curves")
-
-    # if len(losses["w1p"]) > 1:
-    #     plotting.plot_eval(
-    #         losses,
-    #         epoch,
-    #         save_epochs,
-    #         coords=coords,
-    #         name=name + "_eval",
-    #         losses_path=losses_path,
-    #         show=False,
-    #     )
-    #
-    #     try:
-    #         remove(losses_path + "/" + str(epoch - save_epochs) + "_eval.pdf")
-    #     except:
-    #         logging.info("Couldn't remove previous eval curves")
+    plt.savefig(save_path, bbox_inches="tight")
+    plt.close()
 
 
 def eval_save_plot(
@@ -796,89 +624,71 @@ def eval_save_plot(
     D.eval()
     save_models(D, G, D_optimizer, G_optimizer, args.models_path, epoch, multi_gpu=args.multi_gpu)
 
-    use_mask = args.mask_c or args.clabels or args.gapt_mask
-
-    real_jets = jetnet.utils.gen_jet_corrections(
-        X_test.particle_normalisation(X_test.particle_data[: args.eval_tot_samples], inverse=True),
-        zero_mask_particles=False,
-        ret_mask_separate=use_mask,
-        zero_neg_pt=False,
-    )
-
-
     gen_output = gen_multi_batch(
         model_args,
         G,
         args.batch_size,
-        args.eval_tot_samples,
+        args.fid_eval_samples,
         args.num_hits,
         out_device="cpu",
         model=args.model,
         detach=True,
-        labels=X_test.jet_data[: args.eval_tot_samples] if use_mask else None,
         **extra_args,
-    )
+    ).numpy()
 
-    gen_jets = jetnet.utils.gen_jet_corrections(
-        X_test.particle_normalisation(gen_output, inverse=True),
-        ret_mask_separate=use_mask,
-        zero_mask_particles=use_mask,
-    )
-
-    gen_jets = gen_jets.numpy()
-    if gen_mask is not None:
-        gen_mask = gen_mask.numpy()
-
-    #  TODO check whether need to not comment it out
-    # evaluate(
-    #     losses,
-    #     real_jets,
-    #     gen_jets,
-    #     args.jets,
-    #     num_particles=args.num_hits - args.pad_hits,
-    #     num_w1_eval_samples=args.w1_num_samples[0],
-    #     num_cov_mmd_eval_samples=args.cov_mmd_num_samples,
-    #     fpnd_batch_size=args.fpnd_batch_size,
-    #     efp_jobs=args.efp_jobs if hasattr(args, "efp_jobs") else None,
-    # )
     save_losses(losses, args.losses_path)
 
-    if args.make_plots:
-        make_plots(
-            losses,
-            epoch,
-            real_jets,
-            gen_jets,
-            real_mask,
-            gen_mask,
-            args.jets,
-            args.num_hits,
-            str(epoch),
-            args.figs_path,
-            args.losses_path,
-            save_epochs=args.save_epochs,
-            const_ylim=args.const_ylim,
-            coords=args.coords,
-            loss=args.loss,
-            shower_ims=args.shower_ims,
+    if len(losses["G"]) > 1:
+        plotting.plot_losses(
+            losses, loss=args.loss, name=str(epoch), losses_path=args.losses_path, show=False
         )
 
-    #  TODO check whether things got commented out because of local training
-    # save model state and sample generated jets if this is the lowest w1m score yet
-    # if epoch > 0 and losses["w1m"][-1][0] < best_epoch[-1][1]:
-    #     best_epoch.append([epoch, losses["w1m"][-1][0]])
-    #     np.savetxt(f"{args.outs_path}/best_epoch.txt", np.array(best_epoch))
-    
-    #     np.save(f"{args.outs_path}/best_epoch_gen_jets", gen_jets)
-    #     np.save(f"{args.outs_path}/best_epoch_gen_mask", gen_mask)
-    
-    #     with open(f"{args.outs_path}/best_epoch_losses.txt", "w") as f:
-    #         f.write(str({key: losses[key][-1] for key in losses}))
-    
-    #     if args.multi_gpu:
-    #         torch.save(G.module.state_dict(), f"{args.outs_path}/G_best_epoch.pt")
-    #     else:
-    #         torch.save(G.state_dict(), f"{args.outs_path}/G_best_epoch.pt")
+        try:
+            remove(args.losses_path + "/" + str(epoch - args.save_epochs) + ".pdf")
+        except:
+            logging.info("Couldn't remove previous loss curves")
+
+    make_images(gen_output, f"{args.figs_path}/{epoch}.pdf")
+
+    if "fid" in losses:
+        losses["fid"].append(
+            evaluation.get_fid(
+                gen_output,
+                args.num_hits,
+                args.mnist_num,
+                batch_size=args.fpnd_batch_size,
+            )
+        )
+
+        if len(losses["fid"]) > 1:
+            plotting.plot_fid(
+                losses,
+                epoch,
+                args.save_epochs,
+                name=str(epoch) + "_eval",
+                losses_path=args.losses_path,
+                show=False,
+            )
+
+            try:
+                remove(args.losses_path + "/" + str(epoch - args.save_epochs) + "_eval.pdf")
+            except:
+                logging.info("Couldn't remove previous eval curves")
+
+        # save model state and sample generated jets if this is the lowest w1m score yet
+        if epoch > 0 and losses["fid"][-1] < best_epoch[-1][1]:
+            best_epoch.append([epoch, losses["fid"][-1]])
+            np.savetxt(f"{args.outs_path}/best_epoch.txt", np.array(best_epoch))
+
+            np.save(f"{args.outs_path}/best_epoch_gen_outputs", gen_output)
+
+            with open(f"{args.outs_path}/best_epoch_losses.txt", "w") as f:
+                f.write(str({key: losses[key][-1] for key in losses}))
+
+            if args.multi_gpu:
+                torch.save(G.module.state_dict(), f"{args.outs_path}/G_best_epoch.pt")
+            else:
+                torch.save(G.state_dict(), f"{args.outs_path}/G_best_epoch.pt")
 
 
 def train_loop(
@@ -897,21 +707,12 @@ def train_loop(
     extra_args,
 ):
     lenX = len(X_train_loaded)
-    
+
     for batch_ndx, data in tqdm(
         enumerate(X_train_loaded), total=lenX, mininterval=0.1, desc=f"Epoch {epoch}"
     ):
-        labels = (
-            data[1].to(args.device) if (args.clabels or args.mask_c or args.gapt_mask) else None
-        )
-        data = data[0].to(args.device)
+        data = data.to(args.device)
 
-        if args.model == "pcgan":
-            # run through pre-trained inference network first i.e. find latent representation
-            data = model_train_args["pcgan_G_inv"](data.clone())
-        
-        
-        
         if args.num_critic > 1 or (batch_ndx == 0 or (batch_ndx - 1) % args.num_gen == 0):
             D_loss_items = train_D(
                 model_train_args,
@@ -924,11 +725,11 @@ def train_loop(
                 loss_args=D_loss_args,
                 gen_args=gen_args,
                 augment_args=args,
-                labels=labels,
                 model=args.model,
                 epoch=epoch - 1,
-                # print outputs for the last iteration of each epoch
-                print_output=(batch_ndx == lenX - 1),
+                print_output=(
+                    batch_ndx == lenX - 1
+                ),  # print outputs for the last iteration of each epoch
                 **extra_args,
             )
 
@@ -945,7 +746,6 @@ def train_loop(
                 batch_size=args.batch_size,
                 gen_args=gen_args,
                 augment_args=args,
-                labels=labels,
                 model=args.model,
                 epoch=epoch - 1,
                 **extra_args,
@@ -958,7 +758,7 @@ def train_loop(
         if args.break_zero:
             if batch_ndx == 0:
                 break
-        
+
 
 def train(
     args,
