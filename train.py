@@ -799,20 +799,13 @@ def eval_save_plot(
     best_epoch,
     **extra_args,
 ):
-    G.eval()
-    D.eval()
-    save_models(D, G, D_optimizer, G_optimizer, args.models_path, epoch, multi_gpu=args.multi_gpu)
-
-    use_mask = args.mask_c or args.clabels or args.gapt_mask
-
-    real_jets = jetnet.utils.gen_jet_corrections(
-        X_test.particle_normalisation(X_test.particle_data[: args.eval_tot_samples], inverse=True),
-        zero_mask_particles=False,
-        ret_mask_separate=use_mask,
-        zero_neg_pt=False,
+    real_jets, real_mask = X_test.unnormalize_features(
+        X_test.data[: args.eval_tot_samples].clone(),
+        ret_mask_separate=True,
+        is_real_data=True,
+        zero_mask_particles=True,
+        zero_neg_pt=True,
     )
-
-
     gen_output = gen_multi_batch(
         model_args,
         G,
@@ -822,21 +815,27 @@ def eval_save_plot(
         out_device="cpu",
         model=args.model,
         detach=True,
-        labels=X_test.jet_data[: args.eval_tot_samples] if use_mask else None,
+        labels=X_test.jet_features[: args.eval_tot_samples]
+        if (args.mask_c or args.clabels)
+        else None,
         **extra_args,
     )
-
-    gen_jets = jetnet.utils.gen_jet_corrections(
-        X_test.particle_normalisation(gen_output, inverse=True),
-        ret_mask_separate=use_mask,
-        zero_mask_particles=use_mask,
+    gen_jets, gen_mask = X_test.unnormalize_features(
+        gen_output,
+        ret_mask_separate=True,
+        is_real_data=False,
+        zero_mask_particles=True,
+        zero_neg_pt=True,
     )
-
+    real_jets = real_jets.detach().cpu().numpy()
+    if real_mask is not None:
+        real_mask = real_mask.detach().cpu().numpy()
     gen_jets = gen_jets.numpy()
     if gen_mask is not None:
         gen_mask = gen_mask.numpy()
 
-    #  TODO check whether need to not comment it out
+
+    #  TODO need to comment it out
     # evaluate(
     #     losses,
     #     real_jets,
@@ -870,7 +869,7 @@ def eval_save_plot(
             shower_ims=args.shower_ims,
         )
 
-    #  TODO check whether things got commented out because of local training
+    #  Commented out because deprecated? TODO
     # save model state and sample generated jets if this is the lowest w1m score yet
     # if epoch > 0 and losses["w1m"][-1][0] < best_epoch[-1][1]:
     #     best_epoch.append([epoch, losses["w1m"][-1][0]])
