@@ -981,6 +981,7 @@ def train(
 ):
     if args.start_epoch == 0 and args.save_zero:
         logging.info("First eval")
+        print("didn't skip")
         
         eval_save_plot(
             args,

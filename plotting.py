@@ -48,7 +48,7 @@ def plot_hit_feats(
         np.linspace(0, 50000, 51),
     ]
 
-    plabels = plabels_dict[coords]
+    # plabels = plabels_dict[coords]
 
     if real_mask is not None:
         parts_real = real_jets[real_mask]
