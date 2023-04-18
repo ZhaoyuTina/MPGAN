@@ -351,6 +351,8 @@ def gen_multi_batch(
     assert out_device == "cuda" or out_device == "cpu", "Invalid device type"
 
     if labels is not None:
+        print("labels.shape[0]", labels.shape[0])
+        print("num_samples", num_samples)
         assert labels.shape[0] == num_samples, "number of labels doesn't match num_samples"
         labels = Tensor(labels)
 
@@ -809,17 +811,21 @@ def eval_save_plot(
     gen_output = gen_multi_batch(
         model_args,
         G,
-        args.batch_size,
-        args.eval_tot_samples,
+        args.batch_size,  
+        args.eval_tot_samples, #here
         args.num_hits,
         out_device="cpu",
         model=args.model,
         detach=True,
-        labels=X_test.jet_features[: args.eval_tot_samples]
+        labels=X_test.jet_features[: args.eval_tot_samples]  #here
         if (args.mask_c or args.clabels)
         else None,
         **extra_args,
     )
+    # TODO Print out number of labels and samples
+    # Python debugger breakpoint()
+    # comapre what has changed
+
     gen_jets, gen_mask = X_test.unnormalize_features(
         gen_output,
         ret_mask_separate=True,
@@ -835,18 +841,7 @@ def eval_save_plot(
         gen_mask = gen_mask.numpy()
 
 
-    #  TODO need to comment it out
-    # evaluate(
-    #     losses,
-    #     real_jets,
-    #     gen_jets,
-    #     args.jets,
-    #     num_particles=args.num_hits - args.pad_hits,
-    #     num_w1_eval_samples=args.w1_num_samples[0],
-    #     num_cov_mmd_eval_samples=args.cov_mmd_num_samples,
-    #     fpnd_batch_size=args.fpnd_batch_size,
-    #     efp_jobs=args.efp_jobs if hasattr(args, "efp_jobs") else None,
-    # )
+    
     save_losses(losses, args.losses_path)
 
     if args.make_plots:
