@@ -309,7 +309,7 @@ def parse_evaluation_args(parser):
     parser.add_argument(
         "--eval-tot-samples",
         type=int,
-        default=50000,
+        default=10000,
         help="tot # of jets to generate to sample from",
     )
 
