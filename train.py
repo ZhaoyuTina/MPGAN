@@ -351,6 +351,8 @@ def gen_multi_batch(
     assert out_device == "cuda" or out_device == "cpu", "Invalid device type"
 
     if labels is not None:
+        logging.info(f"labels.shape[0], {labels.shape[0]}")
+        logging.info(f"num_samples, {num_samples}")
         print("labels.shape[0]", labels.shape[0])
         print("num_samples", num_samples)
         assert labels.shape[0] == num_samples, "number of labels doesn't match num_samples"
@@ -978,6 +980,8 @@ def train(
     extra_args,
 ):
     if args.start_epoch == 0 and args.save_zero:
+        logging.info("First eval")
+        
         eval_save_plot(
             args,
             X_test,
@@ -1040,6 +1044,7 @@ def train(
             logging.info("{} loss: {:.3f}".format(key, losses[key][-1]))
 
         if (epoch) % args.save_epochs == 0:
+            logging.info("five epochs")
             eval_save_plot(
                 args,
                 X_test,
