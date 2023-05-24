@@ -1139,12 +1139,12 @@ def init_project_dirs(args):
         else:
             args.dir_path = str(pathlib.Path(__file__).parent.resolve()) + "/calogan_outputs/"
 
-    # os.system(f"mkdir -p {args.dir_path}")
-    os.makedirs(args.dir_path)
+    os.system(f"mkdir -p {args.dir_path}")
+    # os.makedirs(args.dir_path)
 
     args.efps_path = str(pathlib.Path(args.dir_path).parent.resolve()) + "/efps/"
-    # os.system(f"mkdir -p {args.efps_path}")
-    os.makedirs(args.efps_path)
+    os.system(f"mkdir -p {args.efps_path}")
+    # os.makedirs(args.efps_path)
 
     return args
 
