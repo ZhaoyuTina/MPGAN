@@ -1,7 +1,7 @@
 import torch
 from torch import nn, Tensor
 import torch.nn.functional as F
-
+from torch.distributions import MultivariateNormal
 from .spectral_normalization import SpectralNorm
 
 import logging
@@ -207,31 +207,83 @@ class GAPT_G(nn.Module):
         self,
         num_particles: int,
         output_feat_size: int,
+        global_noise_input_dim: int = 0,
+        global_noise_feat_dim: int = 0,
+        global_noise_layers: list = [],
+        learnable_init_noise: bool = False,
+        noise_conditioning: bool = False,
+        n_conditioning: bool = False,
+        n_normalized: bool = False,
         sab_layers: int = 2,
+        use_custom_mab: bool = False,
         num_heads: int = 4,
         embed_dim: int = 32,
+        init_noise_dim: int = 8,
         sab_fc_layers: list = [],
         layer_norm: bool = False,
+        spectral_norm: bool = False,
         dropout_p: float = 0.0,
         final_fc_layers: list = [],
         use_mask: bool = True,
         use_isab: bool = False,
         num_isab_nodes: int = 10,
+        block_residual = False,
         linear_args: dict = {},
     ):
         super(GAPT_G, self).__init__()
         self.num_particles = num_particles
         self.output_feat_size = output_feat_size
         self.use_mask = use_mask
+        self.learnable_init_noise = learnable_init_noise
+        self.noise_conditioning = noise_conditioning
+        self.n_conditioning = n_conditioning
+        self.n_normalized = n_normalized
+        self.block_residual = block_residual
+
+        # Learnable gaussian noise for sampling initial set
+        if self.learnable_init_noise:
+            self.mu = nn.Parameter(torch.randn(self.num_particles, init_noise_dim))
+            self.std = nn.Parameter(torch.randn(self.num_particles, init_noise_dim))
+
+            # Projecting initial noise z to embed_dims
+            # self.input_embedding = LinearNet(
+            #     layers = [],
+            #     input_size = init_noise_dim,
+            #     output_size = embed_dim,
+            #     **linear_args
+            # )
+
+        # MLP for processing conditioning vector (input dims = global noise dims + 1)
+        if noise_conditioning or n_conditioning:
+            noise_net_input_dim = 0
+            if noise_conditioning:
+                noise_net_input_dim += global_noise_input_dim
+            if n_conditioning:
+                noise_net_input_dim += 1
+            self.global_noise_net = LinearNet(
+                layers = global_noise_layers,
+                input_size = noise_net_input_dim,
+                output_size = global_noise_feat_dim,
+                **linear_args
+            )
 
         self.sabs = nn.ModuleList()
 
+        # Adjust MAB input dims based on conditioning
+        ff_output_dim = embed_dim
+        if noise_conditioning or n_conditioning:
+            embed_dim += global_noise_feat_dim
+
         sab_args = {
             "embed_dim": embed_dim,
+            "ff_output_dim": ff_output_dim,
             "ff_layers": sab_fc_layers,
+            "conditioning": noise_conditioning or n_conditioning,
             "final_linear": False,
             "num_heads": num_heads,
+            "use_custom_mab": use_custom_mab,
             "layer_norm": layer_norm,
+            "spectral_norm": spectral_norm,
             "dropout_p": dropout_p,
             "linear_args": linear_args,
         }
@@ -248,12 +300,12 @@ class GAPT_G(nn.Module):
             **linear_args,
         )
 
-    def forward(self, x: Tensor, labels: Tensor = None):
+    def forward(self, x: Tensor, labels: Tensor = None, z: Tensor = None):
         if self.use_mask:
             # unnormalize the last jet label - the normalized # of particles per jet
             # (between 1/``num_particles`` and 1) - to between 0 and ``num_particles`` - 1
             num_jet_particles = (labels[:, -1] * self.num_particles).int() - 1
-            # sort the particles bythe first noise feature per particle, and the first
+            # sort the particles by the first noise feature per particle, and the first
             # ``num_jet_particles`` particles receive a 1-mask, the rest 0.
             mask = (
                 (x[:, :, 0].argsort(1).argsort(1) <= num_jet_particles.unsqueeze(1))
@@ -265,13 +317,40 @@ class GAPT_G(nn.Module):
             )
         else:
             mask = None
-
+        
+        # if self.learnable_init_noise:
+        #     x = self.input_embedding(x)
+        
+        # Concatenate global noise and # particles depending on conditioning
+        if self.n_normalized:
+            num_jet_particles = labels[:, -1]
+        else:
+            num_jet_particles += 1
+        if self.noise_conditioning or self.n_conditioning:
+            if self.noise_conditioning and self.n_conditioning:
+                z = torch.cat((z, num_jet_particles.unsqueeze(1)), dim=1)
+            elif self.n_conditioning:
+                z = num_jet_particles.unsqueeze(1).float()
+            z = self.global_noise_net(z)
+        
         for sab in self.sabs:
-            x = sab(x, _attn_mask(mask))
+            sab_out = sab(x, _attn_mask(mask), z)
+            x = x + sab_out if self.block_residual else sab_out
 
         x = torch.tanh(self.final_fc(x))
 
         return torch.cat((x, mask - 0.5), dim=2) if mask is not None else x
+    
+    def sample_init_set(self, batch_size):
+        if self.learnable_init_noise:
+            cov = torch.eye(self.std.shape[1]).repeat(self.num_particles, 1, 1).to(self.std.device) * (self.std ** 2).unsqueeze(2)
+            assert cov.shape==(self.num_particles, self.std.shape[1], self.std.shape[1])
+            mvn = MultivariateNormal(loc=self.mu, covariance_matrix=cov)
+            return mvn.rsample((batch_size, ))
+            # std_mu = torch.zeros_like(self.mu).repeat(batch_size,1,1)
+            # std_sigma = torch.ones_like(self.std).repeat(batch_size,1,1)
+            # std_samples = torch.normal(std_mu, std_sigma)
+            # return std_samples * self.std + self.mu
 
 
 class GAPT_D(nn.Module):
@@ -282,48 +361,86 @@ class GAPT_D(nn.Module):
         sab_layers: int = 2,
         num_heads: int = 4,
         embed_dim: int = 32,
+        cond_feat_dim: int = 8,
+        cond_net_layers: list = [],
+        n_conditioning: bool = False,
+        n_normalized: bool = False,
+        use_custom_mab: bool = False,
         sab_fc_layers: list = [],
         layer_norm: bool = False,
+        spectral_norm: bool = False,
         dropout_p: float = 0.0,
         final_fc_layers: list = [],
         use_mask: bool = True,
         use_isab: bool = False,
         num_isab_nodes: int = 10,
+        use_ise: bool = False,
+        num_ise_nodes: int = 10,
+        block_residual = False,
         linear_args: dict = {},
     ):
         super(GAPT_D, self).__init__()
         self.num_particles = num_particles
         self.input_feat_size = input_feat_size
         self.use_mask = use_mask
-
+        self.n_conditioning = n_conditioning
+        self.n_normalized = n_normalized
+        self.use_ise = use_ise
+        self.block_residual = block_residual
+        # MLP for processing # particles
+        if n_conditioning:
+            cond_net_input_dim = 1
+            self.cond_net = LinearNet(
+                layers = cond_net_layers,
+                input_size = cond_net_input_dim,
+                output_size = cond_feat_dim,
+                **linear_args
+            )
         self.sabs = nn.ModuleList()
+
+        ff_output_dim = embed_dim
+        if n_conditioning:
+            embed_dim += cond_feat_dim
 
         sab_args = {
             "embed_dim": embed_dim,
             "ff_layers": sab_fc_layers,
+            "ff_output_dim": ff_output_dim,
+            "use_custom_mab": use_custom_mab,
+            "conditioning": n_conditioning,
             "final_linear": False,
             "num_heads": num_heads,
             "layer_norm": layer_norm,
+            "spectral_norm": spectral_norm,
             "dropout_p": dropout_p,
             "linear_args": linear_args,
         }
 
         self.input_embedding = LinearNet(
-            [], input_size=input_feat_size, output_size=embed_dim, **linear_args
+            [], input_size=input_feat_size, output_size=ff_output_dim, **linear_args
         )
 
-        # intermediate layers
+        # Intermediate layers
         for _ in range(sab_layers):
             self.sabs.append(SAB(**sab_args) if not use_isab else ISAB(num_isab_nodes, **sab_args))
+        
+        # Encoding/Pooling layers
+        linear_net_input_dim = ff_output_dim
+        if use_ise:
+            self.ises = nn.ModuleList()
+            for _ in range(sab_layers):
+                self.ises.append(ISE(num_ise_nodes, **sab_args))
+            linear_net_input_dim *= sab_layers
+        else:
+            self.pma = PMA(
+                num_seeds=1,
+                **sab_args,
+            )
 
-        self.pma = PMA(
-            num_seeds=1,
-            **sab_args,
-        )
-
+        # Classification network
         self.final_fc = LinearNet(
             final_fc_layers,
-            input_size=embed_dim,
+            input_size=linear_net_input_dim,
             output_size=1,
             final_linear=True,
             **linear_args,
@@ -337,8 +454,29 @@ class GAPT_D(nn.Module):
             mask = None
 
         x = self.input_embedding(x)
-
-        for sab in self.sabs:
-            x = sab(x, _attn_mask(mask))
-
-        return torch.sigmoid(self.final_fc(self.pma(x, _attn_mask(mask)).squeeze()))
+        
+        # Use # particles for conditioning
+        z = None
+        if self.n_conditioning:
+            if self.n_normalized:
+                num_jet_particles = labels[:, -1]
+            else:
+                num_jet_particles = (labels[:, -1] * self.num_particles).int()
+            z = num_jet_particles.unsqueeze(1).float()
+            z = self.cond_net(z)
+        
+        # Use appropriate forward pass corresponding to encoding/pooling operation
+        if self.use_ise:
+            e = torch.Tensor().to(x.device)
+            for sab, ise in zip(self.sabs, self.ises):
+                sab_out = sab(x, _attn_mask(mask), z)
+                x = x + sab_out if self.block_residual else sab_out
+                e = torch.cat((e, ise(x, _attn_mask(mask), z)), dim=1)
+            out = e
+        else:
+            for sab in self.sabs:
+                sab_out = sab(x, _attn_mask(mask), z)
+                x = x + sab_out if self.block_residual else sab_out
+            out = self.pma(x, _attn_mask(mask), z).squeeze()
+        
+        return torch.sigmoid(self.final_fc(out))

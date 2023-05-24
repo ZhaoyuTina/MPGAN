@@ -611,15 +611,74 @@ def parse_gapt_args(parser):
         default=10,
         help="number of induced nodes in ISAB blocks, if using ISAB blocks",
     )
+    parser.add_argument(
+        "--num-ise-nodes",
+        type=int,
+        default=10,
+        help="number of induced nodes in ISE, if using ISE",
+    )
 
+    parser.add_argument(
+        "--global-noise-input-dim",
+        type=int,
+        default=8,
+        help="size of global noise vector z",
+    )
+
+    parser.add_argument(
+        "--global-noise-feat-dim",
+        type=int,
+        default=8,
+        help="size of processed global noise vector z'",
+    )
+
+    parser.add_argument(
+        "--global-noise-layers",
+        type=int,
+        nargs="*",
+        default=[],
+        help="Global noise MLP intermediate layers",
+    )
+
+    parser.add_argument(
+        "--cond-feat-dim",
+        type=int,
+        default=8,
+        help="size of processed conditional vector z'",
+    )
+
+    parser.add_argument(
+        "--init-noise-dim",
+        type=int,
+        default=8,
+        help="size of initial noise for sampling the set",
+    )
+
+    parser.add_argument(
+        "--cond-net-layers",
+        type=int,
+        nargs="*",
+        default=[],
+        help="Discriminator conditional net intermediate layers",
+    )
+    add_bool_arg(parser, "learnable-init-noise", "learn the gaussian noise parameters for sampling initial set", default=False)
+   
+    add_bool_arg(parser, "noise-conditioning", "condition generator on global noise", default=False)
+    add_bool_arg(parser, "n-conditioning", "condition generator on num. particles", default=False)
+    add_bool_arg(parser, "n-normalized", "use normalized num. particles", default=False)
+    add_bool_arg(parser, "no-D-conditioning", "do not condition discriminator on num. particles", default=False)
     add_bool_arg(parser, "gapt-mask", "use mask in GAPT", default=True)
     add_bool_arg(parser, "use-isab", "use ISAB in GAPT", default=False)
+    add_bool_arg(parser, "use-ise", "use ISE in GAPT discriminator", default=False)
+    add_bool_arg(parser, "block-residual", "residual connection at each SAB", default=False)
 
     add_bool_arg(parser, "layer-norm", "use layer normalization in G and D", default=False)
     add_bool_arg(parser, "layer-norm-disc", "use layer normalization in generator", default=False)
     add_bool_arg(
         parser, "layer-norm-gen", "use layer normalization in discriminator", default=False
     )
+    add_bool_arg(parser, "use-custom-mab", "use a custom (Stelzner's) implementation of MAB in GAPT", default=False)
+
 
 
 def parse_ext_models_args(parser):
@@ -1308,6 +1367,7 @@ def setup_gapt(args, gen):
         "leaky_relu_alpha": args.leaky_relu_alpha,
         "dropout_p": args.gen_dropout if gen else args.disc_dropout,
         "batch_norm": args.batch_norm_gen if gen else args.batch_norm_disc,
+        "layer_norm": args.layer_norm_gen if gen else args.layer_norm_disc,
         "spectral_norm": args.spectral_norm_gen if gen else args.spectral_norm_disc,
     }
 
@@ -1316,9 +1376,27 @@ def setup_gapt(args, gen):
         "num_heads": args.num_heads,
         "embed_dim": args.gapt_embed_dim,
         "sab_fc_layers": args.sab_fc_layers,
+        "use_custom_mab": args.use_custom_mab,
         "use_mask": args.gapt_mask,
         "use_isab": args.use_isab,
         "num_isab_nodes": args.num_isab_nodes,
+        "block_residual": args.block_residual
+    }
+
+    global_noise_args = {
+        "global_noise_input_dim": args.global_noise_input_dim,
+        "global_noise_feat_dim": args.global_noise_feat_dim,
+        "global_noise_layers": args.global_noise_layers,
+        "noise_conditioning": args.noise_conditioning,
+        "n_conditioning": args.n_conditioning,
+        "n_normalized": args.n_normalized
+    }
+
+    cond_net_args = {
+        "cond_feat_dim": args.cond_feat_dim,
+        "cond_net_layers": args.cond_net_layers,
+        "n_conditioning": args.n_conditioning and not args.no_D_conditioning,
+        "n_normalized": args.n_normalized
     }
 
     # generator-specific args
@@ -1328,6 +1406,9 @@ def setup_gapt(args, gen):
         "final_fc_layers": args.final_fc_layers_gen,
         "dropout_p": args.gen_dropout,
         "layer_norm": args.layer_norm_gen,
+        "spectral_norm": args.spectral_norm_gen,
+        "learnable_init_noise": args.learnable_init_noise,
+        "init_noise_dim": args.init_noise_dim
     }
 
     # discriminator-specific args
@@ -1337,21 +1418,25 @@ def setup_gapt(args, gen):
         "final_fc_layers": args.final_fc_layers_disc,
         "dropout_p": args.disc_dropout,
         "layer_norm": args.layer_norm_disc,
+        "spectral_norm": args.spectral_norm_disc,
+        "use_ise": args.use_ise,
+        "num_ise_nodes": args.num_ise_nodes
     }
 
     if gen:
         return GAPT_G(
             **gen_args,
             **common_args,
+            **global_noise_args,
             linear_args=linear_args,
         )
     else:
         return GAPT_D(
             **disc_args,
             **common_args,
+            **cond_net_args,
             linear_args=linear_args,
         )
-
 
 def models(args, gen_only=False):
     """Set up generator and discriminator models, either new or loaded from a state dict"""
