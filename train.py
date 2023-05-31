@@ -87,7 +87,7 @@ def main():
         use_mask=args.mask,
         train_fraction=args.ttsplit,
     )
-    jet_norm = FeaturewiseLinear(feature_scales=1.0 / args.num_hits)
+    # jet_norm = FeaturewiseLinear(feature_scales=1.0 / args.num_hits)
 
     # data_args = {
     #     "jet_type": args.jets,
