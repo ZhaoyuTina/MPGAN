@@ -304,8 +304,8 @@ def gen(
         )
 
    
-
-    semi_gen_data = G(noise, labels)
+    global_noise = torch.randn(num_samples, model_args['global_noise_dim']).to(device) if G.noise_conditioning else None
+    semi_gen_data = G(noise, labels, global_noise)
 
     ste = BucketizeSTE(device)
     gen_data = ste(semi_gen_data)
