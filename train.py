@@ -618,9 +618,6 @@ def train_G(
         p = augment_args.aug_prob if not augment_args.adaptive_prob else augment_args.augment_p[-1]
         gen_data = augment.augment(augment_args, gen_data, p)
 
-    print("gen data")
-    print(gen_data.shape)
-    print(gen_data)
 
     D_fake_output = D(gen_data, labels)
 
@@ -910,8 +907,7 @@ def train_loop(
     for batch_ndx, data in tqdm(
         enumerate(X_train_loaded), total=lenX, mininterval=0.1, desc=f"Epoch {epoch}"
     ):  
-        print("real data")
-        print(data)
+       
         labels = (
             data[1].to(args.device) if (args.clabels or args.mask_c or args.gapt_mask) else None
         )
