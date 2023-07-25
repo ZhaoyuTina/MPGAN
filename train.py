@@ -129,7 +129,7 @@ def main():
     logging.info("Optimizers loaded")
 
     losses, best_epoch = setup_training.losses(args)
-
+    print("main before train")
     train(
         args,
         X_train,
@@ -223,7 +223,7 @@ class BucketizeFunction(torch.autograd.Function):
             
             filter_layer[:, eta_idx] = ((eta_bins + 0.5) / LAYER_SPECS[i][1]) + shift
             input[filter] = filter_layer
-          
+        input = torch.round(input, decimals=4)  
         return input
 
     @staticmethod
@@ -618,11 +618,17 @@ def train_G(
         p = augment_args.aug_prob if not augment_args.adaptive_prob else augment_args.augment_p[-1]
         gen_data = augment.augment(augment_args, gen_data, p)
 
+    print("gen data")
+    print(gen_data.shape)
+    print(gen_data)
+
     D_fake_output = D(gen_data, labels)
 
     logging.debug("D fake output:")
     logging.debug(D_fake_output[:10])
 
+    #TODO try to see whether achieve here
+    print("train G")
     G_loss = calc_G_loss(loss, D_fake_output)
 
     G_loss.backward()
@@ -903,7 +909,9 @@ def train_loop(
     
     for batch_ndx, data in tqdm(
         enumerate(X_train_loaded), total=lenX, mininterval=0.1, desc=f"Epoch {epoch}"
-    ):
+    ):  
+        print("real data")
+        print(data)
         labels = (
             data[1].to(args.device) if (args.clabels or args.mask_c or args.gapt_mask) else None
         )
