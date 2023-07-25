@@ -223,7 +223,7 @@ class BucketizeFunction(torch.autograd.Function):
             
             filter_layer[:, eta_idx] = ((eta_bins + 0.5) / LAYER_SPECS[i][1]) + shift
             input[filter] = filter_layer
-          
+        input = torch.round(input, decimals=4)   
         return input
 
     @staticmethod
