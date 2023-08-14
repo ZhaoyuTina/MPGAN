@@ -624,8 +624,6 @@ def train_G(
     logging.debug("D fake output:")
     logging.debug(D_fake_output[:10])
 
-    #TODO try to see whether achieve here
-    print("train G")
     G_loss = calc_G_loss(loss, D_fake_output)
 
     G_loss.backward()
