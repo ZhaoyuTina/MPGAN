@@ -661,6 +661,17 @@ def parse_gapt_args(parser):
         default=[],
         help="Discriminator conditional net intermediate layers",
     )
+
+    # argument for layerwise training
+    # 0 represents all layers
+    # 1 represents layer 1 and 2 represents layer 2
+    parser.add_argument(
+        "--calogan_layer",
+        type=int,
+        default=0,
+        help="modify the dataset for layerwise training",
+
+    )
    
     add_bool_arg(parser, "learnable-init-noise", "learn the gaussian noise parameters for sampling initial set", default=False)
     add_bool_arg(parser, "noise-conditioning", "condition generator on global noise", default=True)
@@ -679,7 +690,7 @@ def parse_gapt_args(parser):
         parser, "layer-norm-gen", "use layer normalization in discriminator", default=False
     )
     add_bool_arg(parser, "use-custom-mab", "use a custom (Stelzner's) implementation of MAB in GAPT", default=False)
-
+    
 
 
 def parse_ext_models_args(parser):

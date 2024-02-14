@@ -79,6 +79,7 @@ def main():
     # )
 
     print("logE, ", args.logE)
+    # add layer specification inside the obtainer of training data
     X_train = CaloGANDataset(
         train=True,
         data_dir=args.datasets_path,
@@ -86,6 +87,7 @@ def main():
         logE=args.logE,
         use_mask=args.mask,
         train_fraction=args.ttsplit,
+        layer_feature=args.calogan_layer,
     )
     # jet_norm = FeaturewiseLinear(feature_scales=1.0 / args.num_hits)
 
@@ -114,6 +116,7 @@ def main():
         logE=args.logE,
         use_mask=args.mask,
         train_fraction=args.ttsplit,
+        layer_feature=args.calogan_layer,
     )
     X_test_loaded = DataLoader(X_test, batch_size=args.batch_size, pin_memory=True)
     logging.info(f"Data loaded \n X_train \n {X_train} \n X_test \n {X_test}")

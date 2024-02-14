@@ -24,6 +24,7 @@ class CaloGANDataset(torch.utils.data.Dataset):
         use_mask: bool = True,
         train: bool = True,
         train_fraction: float = 0.7,
+        layer_feature: int = 0,
     ):
         self.feature_norms = feature_norms
         self.feature_shifts = feature_shifts
@@ -49,7 +50,28 @@ class CaloGANDataset(torch.utils.data.Dataset):
 
         tcut = int(len(dataset) * train_fraction)
 
-        self.data = dataset[:tcut] if train else dataset[tcut:]
+        z_boundaries = [0.5 + (i - 1) * 1/3 for i in range(3)]
+
+        # obtain corresponding layer
+        if (layer_feature == 1):
+            layer_1_dataset = np.zeros_like(dataset)
+            layer_1_dataset[:,:,2] = dataset[:,:,2]
+            layer_1_dataset[dataset[:,:,2] == z_boundaries[0]] = dataset[dataset[:,:,2] == z_boundaries[0]]
+            self.data = layer_1_dataset[:tcut] if train else layer_1_dataset[tcut:]
+        elif (layer_feature == 2):
+            layer_2_dataset = np.zeros_like(dataset)
+            layer_2_dataset[:,:,2] = dataset[:,:,2]
+            layer_2_dataset[dataset[:,:,2] == z_boundaries[1]] = dataset[dataset[:,:,2] == z_boundaries[1]]
+            self.data = layer_2_dataset[:tcut] if train else layer_2_dataset[tcut:]
+        elif (layer_feature == 3):
+            layer_3_dataset = np.zeros_like(dataset)
+            layer_3_dataset[:,:,2] = dataset[:,:,2]
+            layer_3_dataset[dataset[:,:,2] == z_boundaries[2]] = dataset[dataset[:,:,2] == z_boundaries[2]]
+            self.data = layer_3_dataset[:tcut] if train else layer_3_dataset[tcut:]
+        else:
+            self.data = dataset[:tcut] if train else dataset[tcut:]
+        
+
         self.jet_features = jet_features[:tcut] if train else jet_features[tcut:]
         # print(self.data.shape)
         # print("Real data is ", self.data[0:10, :, 2])
